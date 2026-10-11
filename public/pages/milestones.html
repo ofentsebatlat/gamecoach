@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Milestones — GameCoach</title>
+    <link rel="stylesheet" href="../css/style.css">
+    <link rel="stylesheet" href="../css/milestones.css">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+    <div class="dashboard-layout">
+        <aside class="sidebar">
+            <div class="logo">Game<span>Coach</span></div>
+            <nav class="side-nav">
+                <a href="dashboard.html"><i class="fas fa-chart-line"></i> Dashboard</a>
+                <a href="tutor-chat.html"><i class="fas fa-robot"></i> AI Tutor</a>
+                <a href="#" class="active"><i class="fas fa-trophy"></i> Milestones</a>
+                <a href="game-selection.html"><i class="fas fa-gamepad"></i> My Games</a>
+            </nav>
+        </aside>
+
+        <main class="milestones-main">
+            <header class="milestones-header">
+                <h1>Learning Milestones</h1>
+                <p>Track your journey and unlock new levels of mastery in <span id="game-name-title">the game</span>.</p>
+            </header>
+
+            <section class="milestone-path">
+                <div class="milestone-card active" id="milestone-beginner">
+                    <div class="milestone-icon"><i class="fas fa-seedling"></i></div>
+                    <div class="milestone-info">
+                        <h3>Beginner</h3>
+                        <p>Master the basic controls and core mechanics.</p>
+                        <div class="milestone-status">
+                            <span class="status-badge current">Current Level</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="milestone-card locked" id="milestone-intermediate">
+                    <div class="milestone-icon"><i class="fas fa-shield-alt"></i></div>
+                    <div class="milestone-info">
+                        <h3>Intermediate</h3>
+                        <p>Learn advanced strategies and tactical positioning.</p>
+                        <div class="milestone-status">
+                            <button class="btn-quiz" id="quiz-btn-intermediate" disabled>Take Quiz to Unlock</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="milestone-card locked" id="milestone-advanced">
+                    <div class="milestone-icon"><i class="fas fa-crown"></i></div>
+                    <div class="milestone-info">
+                        <h3>Advanced</h3>
+                        <p>Master pro-level techniques and competitive play.</p>
+                        <div class="milestone-status">
+                            <button class="btn-quiz" id="quiz-btn-advanced" disabled>Take Quiz to Unlock</button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Quiz Modal -->
+            <div id="quiz-modal" class="modal">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h2 id="quiz-title">AI Mastery Quiz</h2>
+                        <span class="close-btn">&times;</span>
+                    </div>
+                    <div class="modal-body">
+                        <div id="quiz-loading" class="quiz-loading">
+                            <div class="spinner"></div>
+                            <p>AI is generating your quiz...</p>
+                        </div>
+                        <div id="quiz-container" style="display: none;">
+                            <div class="quiz-progress">Question <span id="current-q">1</span>/5</div>
+                            <div id="question-area">
+                                <h3 id="question-text">Question content goes here?</h3>
+                                <div class="options-grid" id="options-grid">
+                                    <!-- Options will be loaded here -->
+                                </div>
+                            </div>
+                            <button id="next-q-btn" class="btn-primary" style="display: none;">Next Question</button>
+                        </div>
+                        <div id="quiz-result" style="display: none;">
+                            <h3>Quiz Completed!</h3>
+                            <p id="score-text">You scored 4/5</p>
+                            <p id="result-message">Great job! You've unlocked the next level.</p>
+                            <button id="finish-quiz-btn" class="btn-primary">Continue</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script type="module">
+        import { checkAuthState } from '../js/auth.js';
+        import { db } from '../js/firebase-config.js';
+        import { ref, get, update } from "https://www.gstatic.com/firebasejs/12.11.0/firebase-database.js";
+
+        let currentUser = null;
+        let selectedGame = JSON.parse(localStorage.getItem('selectedGame'));
+        let currentQuizData = [];
+        let currentQuestionIndex = 0;
+        let score = 0;
+
+        checkAuthState(async (user) => {
+            currentUser = user;
+            if (!selectedGame) {
+                window.location.href = 'game-selection.html';
+                return;
+            }
+
+            document.getElementById('game-name-title').textContent = selectedGame.name;
+            loadMilestones();
+        });
+
+        async function loadMilestones() {
+            const progressRef = ref(db, `userProgress/${currentUser.uid}/${selectedGame.id}`);
+            const snapshot = await get(progressRef);
+            
+            if (snapshot.exists()) {
+                const data = snapshot.val();
+                const level = data.level;
+                const coveredTopics = data.coveredTopics || [];
+
+                // Update UI based on level
+                if (level === 'beginner') {
+                    document.getElementById('milestone-beginner').classList.add('active');
+                    if (coveredTopics.length >= 2) {
+                        document.getElementById('quiz-btn-intermediate').disabled = false;
+                        document.getElementById('quiz-btn-intermediate').textContent = 'Take Quiz to Unlock';
+                    } else {
+                        document.getElementById('quiz-btn-intermediate').textContent = 'Cover 2 topics to unlock quiz';
+                    }
+                } else if (level === 'intermediate') {
+                    document.getElementById('milestone-beginner').classList.add('completed');
+                    document.getElementById('milestone-beginner').querySelector('.status-badge').textContent = 'Completed';
+                    document.getElementById('milestone-intermediate').classList.remove('locked');
+                    document.getElementById('milestone-intermediate').classList.add('active');
+                    document.getElementById('milestone-intermediate').querySelector('.milestone-status').innerHTML = '<span class="status-badge current">Current Level</span>';
+                    
+                    if (coveredTopics.length >= 4) {
+                        document.getElementById('quiz-btn-advanced').disabled = false;
+                        document.getElementById('quiz-btn-advanced').textContent = 'Take Quiz to Unlock';
+                    }
+                } else if (level === 'advanced') {
+                    document.getElementById('milestone-beginner').classList.add('completed');
+                    document.getElementById('milestone-intermediate').classList.add('completed');
+                    document.getElementById('milestone-advanced').classList.remove('locked');
+                    document.getElementById('milestone-advanced').classList.add('active');
+                    document.getElementById('milestone-advanced').querySelector('.milestone-status').innerHTML = '<span class="status-badge current">Current Level</span>';
+                }
+            }
+        }
+
+        // Modal Logic
+        const modal = document.getElementById('quiz-modal');
+        const closeBtn = document.querySelector('.close-btn');
+
+        document.getElementById('quiz-btn-intermediate').addEventListener('click', () => startQuiz('intermediate'));
+        document.getElementById('quiz-btn-advanced').addEventListener('click', () => startQuiz('advanced'));
+
+        closeBtn.onclick = () => modal.style.display = "none";
+        window.onclick = (e) => { if (e.target == modal) modal.style.display = "none"; };
+
+        async function startQuiz(targetLevel) {
+            modal.style.display = "block";
+            document.getElementById('quiz-loading').style.display = "block";
+            document.getElementById('quiz-container').style.display = "none";
+            document.getElementById('quiz-result').style.display = "none";
+            
+            currentQuestionIndex = 0;
+            score = 0;
+
+            try {
+                const response = await fetch('/api/quiz', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        game: selectedGame.name,
+                        level: targetLevel === 'intermediate' ? 'beginner' : 'intermediate',
+                        topics: ['Basic Controls', 'Core Mechanics'] // Example topics
+                    })
+                });
+
+                currentQuizData = await response.json();
+                document.getElementById('quiz-loading').style.display = "none";
+                document.getElementById('quiz-container').style.display = "block";
+                showQuestion();
+            } catch (error) {
+                console.error('Quiz Error:', error);
+                alert('Failed to generate quiz. Please try again.');
+                modal.style.display = "none";
+            }
+        }
+
+        function showQuestion() {
+            const q = currentQuizData[currentQuestionIndex];
+            document.getElementById('current-q').textContent = currentQuestionIndex + 1;
+            document.getElementById('question-text').textContent = q.question;
+            
+            const optionsGrid = document.getElementById('options-grid');
+            optionsGrid.innerHTML = '';
+            
+            q.options.forEach((opt, index) => {
+                const btn = document.createElement('button');
+                btn.className = 'option-btn';
+                btn.textContent = opt;
+                btn.onclick = () => selectOption(index);
+                optionsGrid.appendChild(btn);
+            });
+
+            document.getElementById('next-q-btn').style.display = "none";
+        }
+
+        function selectOption(index) {
+            const q = currentQuizData[currentQuestionIndex];
+            const btns = document.querySelectorAll('.option-btn');
+            
+            btns.forEach(btn => btn.disabled = true);
+            
+            if (index === q.correctIndex) {
+                btns[index].classList.add('correct');
+                score++;
+            } else {
+                btns[index].classList.add('wrong');
+                btns[q.correctIndex].classList.add('correct');
+            }
+
+            document.getElementById('next-q-btn').style.display = "block";
+        }
+
+        document.getElementById('next-q-btn').onclick = () => {
+            currentQuestionIndex++;
+            if (currentQuestionIndex < currentQuizData.length) {
+                showQuestion();
+            } else {
+                showResult();
+            }
+        };
+
+        async function showResult() {
+            document.getElementById('quiz-container').style.display = "none";
+            document.getElementById('quiz-result').style.display = "block";
+            document.getElementById('score-text').textContent = `You scored ${score}/${currentQuizData.length}`;
+            
+            const passed = score >= 4;
+            if (passed) {
+                document.getElementById('result-message').textContent = "Congratulations! You've unlocked the next level.";
+                await updateLevel();
+            } else {
+                document.getElementById('result-message').textContent = "Keep practicing! You need 4/5 to advance.";
+            }
+        }
+
+        async function updateLevel() {
+            const progressRef = ref(db, `userProgress/${currentUser.uid}/${selectedGame.id}`);
+            const snapshot = await get(progressRef);
+            const data = snapshot.val();
+            
+            const nextLevel = data.level === 'beginner' ? 'intermediate' : 'advanced';
+            
+            await update(progressRef, {
+                level: nextLevel,
+                lastUpdated: new Date().toISOString()
+            });
+
+            loadMilestones();
+        }
+
+        document.getElementById('finish-quiz-btn').onclick = () => {
+            modal.style.display = "none";
+        };
+    </script>
+</body>
+</html>

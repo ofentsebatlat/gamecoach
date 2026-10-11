@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Tutor — GameCoach</title>
+    <link rel="stylesheet" href="../css/style.css">
+    <link rel="stylesheet" href="../css/tutor-chat.css">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+    <div class="chat-layout">
+        <aside class="chat-sidebar">
+            <div class="sidebar-header">
+                <div class="logo">Game<span>Coach</span></div>
+                <button class="btn-new-chat" id="new-chat-btn"><i class="fas fa-plus"></i> New Chat</button>
+            </div>
+            <div class="chat-history" id="chat-history-list">
+                <!-- Chat history items will be listed here -->
+            </div>
+            <div class="sidebar-footer">
+                <a href="dashboard.html" class="nav-item"><i class="fas fa-chart-line"></i> Dashboard</a>
+                <a href="game-selection.html" class="nav-item"><i class="fas fa-gamepad"></i> Change Game</a>
+                <div class="user-profile">
+                    <span id="user-display-name">Loading...</span>
+                </div>
+            </div>
+        </aside>
+
+        <main class="chat-container">
+            <header class="chat-header">
+                <div class="game-info">
+                    <img id="game-icon" src="" alt="" style="display:none;">
+                    <h2 id="game-name">Select a Game</h2>
+                    <span class="badge" id="user-level">Beginner</span>
+                </div>
+            </header>
+
+            <div class="chat-messages" id="chat-messages">
+                <div class="message ai-message">
+                    <div class="message-content">
+                        Hello! I'm your AI Coach for <span id="welcome-game-name">...</span>. How can I help you improve today?
+                    </div>
+                </div>
+            </div>
+
+            <div class="chat-input-area">
+                <form id="chat-form">
+                    <textarea id="user-input" placeholder="Ask a game-specific question (e.g. 'How do I build fast in Fortnite?')" rows="1"></textarea>
+                    <button type="submit" id="send-btn"><i class="fas fa-paper-plane"></i></button>
+                </form>
+                <p class="input-hint">AI can make mistakes. Verify important info.</p>
+            </div>
+        </main>
+    </div>
+
+    <script type="module">
+        import { checkAuthState } from '../js/auth.js';
+        import { db } from '../js/firebase-config.js';
+        import { ref, get, push, set, onValue } from "https://www.gstatic.com/firebasejs/12.11.0/firebase-database.js";
+
+        let currentUser = null;
+        let selectedGame = JSON.parse(localStorage.getItem('selectedGame'));
+        let currentChatId = null;
+        let chatHistory = [];
+
+        checkAuthState(async (user) => {
+            currentUser = user;
+            document.getElementById('user-display-name').textContent = user.displayName || user.email.split('@')[0];
+            
+            if (!selectedGame) {
+                window.location.href = 'game-selection.html';
+                return;
+            }
+
+            document.getElementById('game-name').textContent = selectedGame.name;
+            document.getElementById('welcome-game-name').textContent = selectedGame.name;
+            
+            // Load user level for this game
+            const progressRef = ref(db, `userProgress/${user.uid}/${selectedGame.id}`);
+            const progressSnapshot = await get(progressRef);
+            if (progressSnapshot.exists()) {
+                document.getElementById('user-level').textContent = progressSnapshot.val().level;
+            }
+
+            loadChatHistory();
+        });
+
+        const chatForm = document.getElementById('chat-form');
+        const userInput = document.getElementById('user-input');
+        const chatMessages = document.getElementById('chat-messages');
+
+        // Auto-resize textarea
+        userInput.addEventListener('input', () => {
+            userInput.style.height = 'auto';
+            userInput.style.height = userInput.scrollHeight + 'px';
+        });
+
+        chatForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const message = userInput.value.trim();
+            if (!message) return;
+
+            // Add user message to UI
+            addMessageToUI('user', message);
+            userInput.value = '';
+            userInput.style.height = 'auto';
+
+            // Add loading indicator
+            const loadingMsg = addLoadingIndicator();
+
+            try {
+                // Call server API to get Claude response
+                const response = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        message,
+                        game: selectedGame.name,
+                        level: document.getElementById('user-level').textContent,
+                        history: chatHistory.slice(-5) // Send last 5 messages for context
+                    })
+                });
+
+                const data = await response.json();
+                
+                if (data.error) throw new Error(data.error);
+
+                // Remove loading and add AI message
+                loadingMsg.remove();
+                addMessageToUI('ai', data.reply);
+
+                // Update local history
+                chatHistory.push({ role: 'user', content: message });
+                chatHistory.push({ role: 'assistant', content: data.reply });
+
+                // Save to Firebase
+                saveChatToFirebase(message, data.reply);
+            } catch (error) {
+                console.error('Chat Error:', error);
+                loadingMsg.remove();
+                addMessageToUI('ai', "Sorry, I'm having trouble connecting right now. Please try again later.");
+            }
+        });
+
+        function addMessageToUI(role, content) {
+            const div = document.createElement('div');
+            div.className = `message ${role}-message`;
+            div.innerHTML = `<div class="message-content">${content}</div>`;
+            chatMessages.appendChild(div);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+            return div;
+        }
+
+        function addLoadingIndicator() {
+            const div = document.createElement('div');
+            div.className = 'message ai-message loading';
+            div.innerHTML = `<div class="message-content"><div class="dots"><span></span><span></span><span></span></div></div>`;
+            chatMessages.appendChild(div);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+            return div;
+        }
+
+        async function saveChatToFirebase(userMsg, aiMsg) {
+            if (!currentChatId) {
+                const chatsRef = ref(db, `chatHistory/${currentUser.uid}/${selectedGame.id}`);
+                const newChatRef = push(chatsRef);
+                currentChatId = newChatRef.key;
+            }
+
+            const chatRef = ref(db, `chatHistory/${currentUser.uid}/${selectedGame.id}/${currentChatId}`);
+            const snapshot = await get(chatRef);
+            let messages = snapshot.exists() ? snapshot.val().messages : [];
+            
+            messages.push({ role: 'user', content: userMsg, timestamp: Date.now() });
+            messages.push({ role: 'ai', content: aiMsg, timestamp: Date.now() });
+
+            await set(chatRef, {
+                userId: currentUser.uid,
+                gameId: selectedGame.id,
+                messages,
+                lastUpdated: Date.now()
+            });
+        }
+
+        function loadChatHistory() {
+            // This would load previous chat sessions for the sidebar
+            // For now, let's keep it simple and just focus on the current session
+        }
+
+        document.getElementById('new-chat-btn').addEventListener('click', () => {
+            chatMessages.innerHTML = `<div class="message ai-message"><div class="message-content">Hello! I'm your AI Coach for ${selectedGame.name}. How can I help you improve today?</div></div>`;
+            currentChatId = null;
+            chatHistory = [];
+        });
+    </script>
+</body>
+</html>

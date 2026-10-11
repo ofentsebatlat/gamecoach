@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Select a Game — GameCoach</title>
+    <link rel="stylesheet" href="../css/style.css">
+    <link rel="stylesheet" href="../css/game-selection.css">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="logo">Game<span>Coach</span></div>
+        <div class="user-menu">
+            <span id="user-name">Welcome!</span>
+            <button id="logout-btn" class="btn-secondary">Logout</button>
+        </div>
+    </nav>
+
+    <main class="game-selection-container">
+        <header class="page-header">
+            <h1>What game do you want to master today?</h1>
+            <p>Select a game to start your personalized learning journey.</p>
+            
+            <div class="search-bar">
+                <i class="fas fa-search"></i>
+                <input type="text" id="game-search" placeholder="Search for a game (e.g. Fortnite, Chess, FIFA)...">
+            </div>
+        </header>
+
+        <div class="game-grid" id="game-grid">
+            <!-- Game cards will be dynamically loaded here -->
+        </div>
+    </main>
+
+    <script type="module">
+        import { checkAuthState, logout } from '../js/auth.js';
+        import { db } from '../js/firebase-config.js';
+        import { ref, update, get } from "https://www.gstatic.com/firebasejs/12.11.0/firebase-database.js";
+
+        const games = [
+            { id: 'fortnite', name: 'Fortnite', genre: 'Battle Royale', image: 'https://via.placeholder.com/300x150?text=Fortnite' },
+            { id: 'chess', name: 'Chess', genre: 'Strategy', image: 'https://via.placeholder.com/300x150?text=Chess' },
+            { id: 'fifa', name: 'FIFA 24', genre: 'Sports', image: 'https://via.placeholder.com/300x150?text=FIFA+24' },
+            { id: 'valorant', name: 'Valorant', genre: 'Tactical Shooter', image: 'https://via.placeholder.com/300x150?text=Valorant' },
+            { id: 'league-of-legends', name: 'League of Legends', genre: 'MOBA', image: 'https://via.placeholder.com/300x150?text=LoL' },
+            { id: 'minecraft', name: 'Minecraft', genre: 'Sandbox', image: 'https://via.placeholder.com/300x150?text=Minecraft' }
+        ];
+
+        let currentUser = null;
+
+        checkAuthState((user) => {
+            currentUser = user;
+            document.getElementById('user-name').textContent = `Welcome, ${user.displayName || 'Gamer'}!`;
+            renderGames(games);
+        });
+
+        document.getElementById('logout-btn').addEventListener('click', logout);
+
+        function renderGames(gamesList) {
+            const grid = document.getElementById('game-grid');
+            grid.innerHTML = '';
+            
+            gamesList.forEach(game => {
+                const card = document.createElement('div');
+                card.className = 'game-card';
+                card.innerHTML = `
+                    <div class="game-image">
+                        <img src="${game.image}" alt="${game.name}">
+                    </div>
+                    <div class="game-info">
+                        <h3>${game.name}</h3>
+                        <p>${game.genre}</p>
+                        <button class="btn-primary start-learning" data-id="${game.id}">Start Learning</button>
+                    </div>
+                `;
+                grid.appendChild(card);
+            });
+
+            // Add event listeners to buttons
+            document.querySelectorAll('.start-learning').forEach(btn => {
+                btn.addEventListener('click', async (e) => {
+                    const gameId = e.target.getAttribute('data-id');
+                    const game = games.find(g => g.id === gameId);
+                    await initializeGameLearning(game);
+                });
+            });
+        }
+
+        async function initializeGameLearning(game) {
+            if (!currentUser) return;
+
+            try {
+                // Initialize user progress for this game if it doesn't exist
+                const progressRef = ref(db, `userProgress/${currentUser.uid}/${game.id}`);
+                const snapshot = await get(progressRef);
+                
+                if (!snapshot.exists()) {
+                    await update(ref(db, `userProgress/${currentUser.uid}/${game.id}`), {
+                        gameId: game.id,
+                        gameName: game.name,
+                        level: 'beginner',
+                        coveredTopics: [],
+                        pendingTopics: ['Basic Controls', 'Core Mechanics', 'Basic Strategy'],
+                        milestonesCompleted: [],
+                        lastUpdated: new Date().toISOString()
+                    });
+                }
+
+                // Update selected games in user profile
+                const userRef = ref(db, `users/${currentUser.uid}`);
+                const userSnapshot = await get(userRef);
+                const userData = userSnapshot.val();
+                const selectedGames = userData.selectedGames || [];
+                
+                if (!selectedGames.includes(game.id)) {
+                    selectedGames.push(game.id);
+                    await update(userRef, { selectedGames });
+                }
+
+                // Redirect to dashboard with game info
+                localStorage.setItem('selectedGame', JSON.stringify(game));
+                window.location.href = 'dashboard.html';
+            } catch (error) {
+                console.error('Error initializing learning path:', error);
+                alert('Error starting learning path. Please try again.');
+            }
+        }
+
+        // Search logic
+        document.getElementById('game-search').addEventListener('input', (e) => {
+            const query = e.target.value.toLowerCase();
+            const filteredGames = games.filter(g => 
+                g.name.toLowerCase().includes(query) || 
+                g.genre.toLowerCase().includes(query)
+            );
+            renderGames(filteredGames);
+        });
+    </script>
+</body>
+</html>

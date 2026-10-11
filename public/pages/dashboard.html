@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard — GameCoach</title>
+    <link rel="stylesheet" href="../css/style.css">
+    <link rel="stylesheet" href="../css/dashboard.css">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <div class="dashboard-layout">
+        <aside class="sidebar">
+            <div class="logo">Game<span>Coach</span></div>
+            <nav class="side-nav">
+                <a href="#" class="active"><i class="fas fa-chart-line"></i> Dashboard</a>
+                <a href="tutor-chat.html"><i class="fas fa-robot"></i> AI Tutor</a>
+                <a href="milestones.html"><i class="fas fa-trophy"></i> Milestones</a>
+                <a href="game-selection.html"><i class="fas fa-gamepad"></i> My Games</a>
+            </nav>
+            <div class="sidebar-footer">
+                <button id="logout-btn" class="btn-secondary"><i class="fas fa-sign-out-alt"></i> Logout</button>
+            </div>
+        </aside>
+
+        <main class="dashboard-main">
+            <header class="dashboard-header">
+                <div class="header-left">
+                    <h1>Dashboard</h1>
+                    <p>Welcome back, <span id="user-name">Gamer</span>!</p>
+                </div>
+                <div class="selected-game-card">
+                    <span id="current-game-name">Select a Game</span>
+                    <span class="badge" id="current-game-level">Beginner</span>
+                </div>
+            </header>
+
+            <section class="overview-grid">
+                <div class="stat-card">
+                    <div class="stat-info">
+                        <h3>Overall Progress</h3>
+                        <p class="stat-value" id="overall-progress-percent">0%</p>
+                    </div>
+                    <div class="stat-chart">
+                        <canvas id="progressCircle"></canvas>
+                    </div>
+                </div>
+
+                <div class="stat-card">
+                    <div class="stat-info">
+                        <h3>Topics Covered</h3>
+                        <p class="stat-value"><span id="topics-covered-count">0</span>/<span id="total-topics-count">0</span></p>
+                    </div>
+                    <i class="fas fa-book-open stat-icon"></i>
+                </div>
+
+                <div class="stat-card">
+                    <div class="stat-info">
+                        <h3>Milestones</h3>
+                        <p class="stat-value" id="milestones-count">0</p>
+                    </div>
+                    <i class="fas fa-medal stat-icon"></i>
+                </div>
+            </section>
+
+            <section class="dashboard-content">
+                <div class="content-left">
+                    <div class="card topics-card">
+                        <div class="card-header">
+                            <h2>Learning Path</h2>
+                            <a href="tutor-chat.html" class="btn-small">Learn More</a>
+                        </div>
+                        <ul class="topic-list" id="topic-list">
+                            <!-- Topics will be loaded here -->
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="content-right">
+                    <div class="card chart-card">
+                        <h2>Skill Breakdown</h2>
+                        <canvas id="skillRadarChart"></canvas>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script type="module">
+        import { checkAuthState, logout } from '../js/auth.js';
+        import { db } from '../js/firebase-config.js';
+        import { ref, get, onValue } from "https://www.gstatic.com/firebasejs/12.11.0/firebase-database.js";
+
+        let currentUser = null;
+        let selectedGame = JSON.parse(localStorage.getItem('selectedGame'));
+
+        checkAuthState(async (user) => {
+            currentUser = user;
+            document.getElementById('user-name').textContent = user.displayName || user.email.split('@')[0];
+            
+            if (!selectedGame) {
+                window.location.href = 'game-selection.html';
+                return;
+            }
+
+            document.getElementById('current-game-name').textContent = selectedGame.name;
+            
+            // Listen for progress updates
+            const progressRef = ref(db, `userProgress/${user.uid}/${selectedGame.id}`);
+            onValue(progressRef, (snapshot) => {
+                if (snapshot.exists()) {
+                    updateDashboardUI(snapshot.val());
+                }
+            });
+        });
+
+        document.getElementById('logout-btn').addEventListener('click', logout);
+
+        function updateDashboardUI(data) {
+            const covered = data.coveredTopics || [];
+            const pending = data.pendingTopics || [];
+            const total = covered.length + pending.length;
+            const percent = total > 0 ? Math.round((covered.length / total) * 100) : 0;
+
+            document.getElementById('current-game-level').textContent = data.level;
+            document.getElementById('overall-progress-percent').textContent = `${percent}%`;
+            document.getElementById('topics-covered-count').textContent = covered.length;
+            document.getElementById('total-topics-count').textContent = total;
+            document.getElementById('milestones-count').textContent = (data.milestonesCompleted || []).length;
+
+            // Render Topics
+            const topicList = document.getElementById('topic-list');
+            topicList.innerHTML = '';
+            
+            covered.forEach(topic => {
+                topicList.innerHTML += `<li class="topic-item completed">
+                    <i class="fas fa-check-circle"></i>
+                    <span>${topic}</span>
+                </li>`;
+            });
+
+            pending.forEach(topic => {
+                topicList.innerHTML += `<li class="topic-item pending">
+                    <i class="far fa-circle"></i>
+                    <span>${topic}</span>
+                </li>`;
+            });
+
+            // Update Charts
+            updateCharts(percent, covered.length, pending.length);
+        }
+
+        let progressCircleChart = null;
+        let skillRadarChart = null;
+
+        function updateCharts(percent, coveredCount, pendingCount) {
+            // Progress Circle
+            const ctx1 = document.getElementById('progressCircle').getContext('2d');
+            if (progressCircleChart) progressCircleChart.destroy();
+            
+            progressCircleChart = new Chart(ctx1, {
+                type: 'doughnut',
+                data: {
+                    datasets: [{
+                        data: [percent, 100 - percent],
+                        backgroundColor: ['#6c5ce7', '#f1f2f6'],
+                        borderWidth: 0,
+                        cutout: '80%'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false }, tooltip: { enabled: false } }
+                }
+            });
+
+            // Skill Radar
+            const ctx2 = document.getElementById('skillRadarChart').getContext('2d');
+            if (skillRadarChart) skillRadarChart.destroy();
+
+            skillRadarChart = new Chart(ctx2, {
+                type: 'radar',
+                data: {
+                    labels: ['Mechanics', 'Strategy', 'Knowledge', 'Communication', 'Consistency'],
+                    datasets: [{
+                        label: 'Current Skill Level',
+                        data: [65, 59, 80, 81, 56], // Mock data for now
+                        fill: true,
+                        backgroundColor: 'rgba(108, 92, 231, 0.2)',
+                        borderColor: '#6c5ce7',
+                        pointBackgroundColor: '#6c5ce7',
+                        pointBorderColor: '#fff',
+                        pointHoverBackgroundColor: '#fff',
+                        pointHoverBorderColor: '#6c5ce7'
+                    }]
+                },
+                options: {
+                    elements: { line: { borderWidth: 3 } },
+                    scales: { r: { angleLines: { display: false }, suggestMin: 0, suggestMax: 100 } }
+                }
+            });
+        }
+    </script>
+</body>
+</html>
